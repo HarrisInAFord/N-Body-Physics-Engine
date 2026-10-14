@@ -46,10 +46,12 @@ maturin develop
 ## Performance Note
 
 The **Rust** physics core uses the **Rayon** library for parallel processing. This is important for N-Body Physics to prevent excessive run-time. HOWEVER, this can use significant CPU resources (up to 95% of my CPU for up to a few minutes straight). If it is desired to limit the CPU usage of this code, limit the number of threads **Rayon** is allowed to use:
-
+```
 export RAYON_NUM_THREADS=4  # Linux / macOS
+```
+```
 $env:RAYON_NUM_THREADS="4"  # Windows PowerShell
-
+```
 ## Validation
 
 To ensure fidelity, the engine's trajectory outputs were validated against **NASA JPL Horizons** ephemeris data for real-world solar objects. The code that performed these validations and the results of the validations is in the "validations" folder
