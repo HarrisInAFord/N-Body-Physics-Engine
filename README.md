@@ -25,20 +25,23 @@ Because this engine uses a **Rust** core bound to **Python**, building the proje
 ### Step-by-Step Compilation Guide
 
 1. **Navigate to the Rust crate directory:**
-   ```bash
-   cd physics_core
-Create and activate a Python virtual environment:
-  Windows PowerShell:
-.\.venv\Scripts\Activate.ps1
+```
+ cd physics_core
+```
 
-  macOS/Linux
-source .venv/bin/activate
+Create and activate a Python virtual environment:
+```
+.\.venv\Scripts\Activate.ps1
+```
 
 Install Maturin and build dependencies:
-   pip install maturin
+```
+pip install maturin
+```
 Compile and install the **Rust** Modules
-   maturin develop
-
+```
+maturin develop
+```
 
 ## Performance Note
 
