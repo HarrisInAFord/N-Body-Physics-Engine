@@ -29,7 +29,7 @@ Because this engine uses a **Rust** core bound to **Python**, building the proje
  cd physics_core
 ```
 
-Create and activate a Python virtual environment:
+Create and activate a **Python** virtual environment:
 ```
 .\.venv\Scripts\Activate.ps1
 ```
