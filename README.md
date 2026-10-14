@@ -22,7 +22,7 @@ Because this engine uses a **Rust** core bound to **Python**, building the proje
 * **Rust Toolchain:** Installed via `rustup` (recommended).
 * **Python 3.8+** installed on your system.
 
-### Step-by-Step Compilation Guide
+### Step-by-Step Compilation Guide (Windows PowerShell or IDE Terminal)
 
 1. **Navigate to the Rust crate directory:**
 ```
