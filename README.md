@@ -1,8 +1,6 @@
 # N-Body-Physics-Engine
 
-# High-Performance Astrodynamics Engine
-
-A hybrid physics simulation engine featuring a **Rust-powered multi-body numerical integrator** bridged to **Python** via **PyO3** and **Maturin**. Designed for real-time orbital mechanics, N-body gravitation, and trajectory validation against NASA JPL Horizons.
+A physics simulation engine featuring a **Rust-powered multi-body numerical integrator** bridged to **Python** via **PyO3** and **Maturin**. Designed for real-time orbital mechanics, N-body gravitation, and trajectory validation against NASA JPL Horizons.
 
 ---
 
