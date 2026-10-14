@@ -1,4 +1,3 @@
-import json
 import csv
 import time
 import re
@@ -6,9 +5,6 @@ import numpy as np
 from tqdm import tqdm
 import physics_core
 from astroquery.jplhorizons import Horizons
-from pathlib import Path
-
-DIR = Path(__file__).parent.resolve()
 
 def to_seconds(time_str: str) -> float:
   time_str = str(time_str).strip().lower()
