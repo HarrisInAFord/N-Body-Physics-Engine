@@ -16,6 +16,20 @@ target
 # rustc will dump stack traces when hitting an internal compiler error to PWD
 rustc-ice-*.txt
 
+# Python virtual environment & cache
+.venv/
+__pycache__/
+*.py[cod]
+
+# Compiled Python extension binaries (PyO3)
+*.pyd
+*.so
+*.dylib
+
+# IDE and system files
+.vscode/
+.DS_Store
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
