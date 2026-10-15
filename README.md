@@ -7,7 +7,7 @@ A physics simulation engine featuring a **Rust-powered multi-body numerical inte
 ## Features
 
 * **High-Performance Rust Core:** Leverages data-parallel iteration via **Rayon** for high-frequency RK4 numerical integration across celestial bodies and spacecraft.
-* **Python Host Integration:** Compiled directly into a high-speed Python module using PyO3/Maturin, allowing seamless integration with scientific plotting tools and game loops.
+* **Python Host Integration:** Compiled directly into a high-speed Python module using PyO3/Maturin, allowing seamless integration with scientific plotting tools (and game loops...).
 * **Validation:** Benchmarked and verified against NASA JPL Horizons ephemerides over year-long integration windows.
 
 ---
