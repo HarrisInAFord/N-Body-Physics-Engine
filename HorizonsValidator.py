@@ -37,7 +37,7 @@ output_file_name = input("  Enter the name you wish to save the results CSV as: 
 # Bodies to validate
 objs_horz = ["10", "199", "299", "399", "301", "499", "599", "699", "799", "899"]
 # Currently validates against the Sun's barycenter, all major planets, and Earth's moon
-epochs = {'start': '2026-10-15', 'stop': '2027-11-15', 'step': step}
+epochs = {'start': '2026-10-15', 'stop': '2027-10-15', 'step': step} # Pulls data for the course of one year
 
 # ----------------------------------------------------
 # Query JPL Horizons for cartesian vectors positions
