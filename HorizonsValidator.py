@@ -177,7 +177,7 @@ for name in bodies:
   )
 
 # 2. Generate time array efficiently
-hours_per_step = 3600 / step_num
+hours_per_step = dt / 3600
 time_hours = np.arange(num_steps) * hours_per_step
 
 # 3. Write CSV cleanly using zip and writerows
