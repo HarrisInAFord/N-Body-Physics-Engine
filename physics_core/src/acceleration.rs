@@ -1,5 +1,24 @@
 use pyo3::prelude::*;
 use std::any::Any;
+// Helper functions
+
+pub fn transpose_3x3(m: &[[f64;3];3]) -> [[f64;3];3] {
+    // Transposes a 3x3 matrix
+    [
+        [m[0][0], m[1][0], m[2][0]],
+        [m[0][1], m[1][1], m[2][1]],
+        [m[0][2], m[1][2], m[2][2]],
+    ]
+}
+
+pub fn mult_3x3_3x1(m1: &[[f64;3];3], m2: &[f64;3]) -> [f64;3] {
+    // Multiplies a 3x3 matrix and a 3x1 matrix
+    [
+        m1[0][0] * m2[0] + m1[0][1] * m2[1] + m1[0][2] * m2[2],
+        m1[1][0] * m2[0] + m1[1][1] * m2[1] + m1[1][2] * m2[2],
+        m1[2][0] * m2[0] + m1[2][1] * m2[1] + m1[2][2] * m2[2],
+    ]
+}
 
 // Acceleration models to be applied to bodies or spacecraft
 
@@ -96,6 +115,9 @@ pub struct J2 {
     pub j2: f64,
     // J2 factor for the attracting body
     #[pyo3(get, set)]
+    pub rot_ax_dir: [f64;4],
+    // Direction and phase of the planet's rotation axis relative to the origin (eccliptic); Described with a unit quaternion
+    #[pyo3(get, set)]
     pub attractor_id: u32, 
     // ID of the attracting body
 }
@@ -103,14 +125,17 @@ pub struct J2 {
 #[pymethods]
 impl J2 {
     #[new]
-    pub fn new(mu: f64, body_pos: [f64;3], r_eq: f64, j2: f64, attractor_id: u32) -> Self {
-        J2 { mu, body_pos, r_eq, j2, attractor_id}
+    pub fn new(mu: f64, body_pos: [f64;3], r_eq: f64, j2: f64, rot_ax_dir: [f64;4], attractor_id: u32) -> Self {
+        J2 { mu, body_pos, r_eq, j2, rot_ax_dir, attractor_id}
     }
 }
 
 impl AccelModel for J2 {
     fn compute_accel(&self, pos: &[f64;3], _vel: &[f64;3]) -> [f64;3] {
-        let J2 { mu, body_pos, r_eq, j2, attractor_id: _u32} = *self; // Pulling useful variables
+        let J2 { mu, body_pos, r_eq, j2, rot_ax_dir, attractor_id: _u32} = *self; // Pulling useful variables
+        
+        let [qw, qx, qy, qz] = rot_ax_dir; // Quaternion components
+        
         let [rx, ry, rz] = [pos[0] - body_pos[0], pos[1] - body_pos[1], pos[2] - body_pos[2]];
         // computes the relative x y z position between the attracting body and given object
         let r_sq = rx * rx + ry * ry + rz* rz;
@@ -120,6 +145,19 @@ impl AccelModel for J2 {
         if r == 0.0 { return [0.0,0.0,0.0];}
         // if one object is inside the other return 0 accel. This should never occur but idk this might prevent (or cause) a bug
 
+        let rot_mat =
+        [
+            [1.0 - 2.0 * ( qy * qy + qz * qz), 2.0 * (qx * qy - qz * qw), 2.0 * (qx * qz + qy * qw)],
+            [2.0 * (qx * qy + qz * qw), 1.0 - 2.0 * (qx * qx + qz * qz), 2.0 * (qy * qz - qx * qw)],
+            [2.0 * (qx * qz - qy * qw), 2.0 * (qy * qz + qx * qw), 1.0 - 2.0 * (qx * qx + qy * qy)]
+        ];
+
+        let trans_rot_mat = transpose_3x3(&rot_mat);
+
+        let [rx, ry, rz] = mult_3x3_3x1(&trans_rot_mat, &[rx, ry, rz]);
+        // Rotates the global coordinate system relative position into the local planet's coordinate system 
+        // (Z axis defined along the axis of rotation)
+
         let r_5th = r_sq * r_sq * r;
         // computes position vector magnitude to the fifth
         let z_r_sq = ( rz / r ) * ( rz / r );
@@ -127,12 +165,15 @@ impl AccelModel for J2 {
         let factor = -1.5 * j2 * mu * (r_eq * r_eq) / r_5th;
         // computes the leading factor of the J2 equation
 
+        let a = // Computes J2 accel in local frame
         [
             factor * rx * (1.0 - 5.0 * z_r_sq),
             factor * ry * (1.0 - 5.0 * z_r_sq),
             factor * rz * (3.0 - 5.0 * z_r_sq),
-        ]
-        // computes J2 accel and outputs it
+        ];
+
+        mult_3x3_3x1(&rot_mat, &a)
+        // Rotates J2 accel from local frame back into global frame
 
     }
     fn name(&self) -> &'static str {"J2"} // Only for debug; unused currently 
