@@ -1,37 +1,7 @@
 use pyo3::prelude::*;
 use std::any::Any;
-//=================================================================================
+use crate::math::{transpose_3x3, mult_3x3_3x1,};
 
-// Helper functions
-
-pub fn transpose_3x3(m: &[[f64;3];3]) -> [[f64;3];3] {
-    // Transposes a 3x3 matrix
-    [
-        [m[0][0], m[1][0], m[2][0]],
-        [m[0][1], m[1][1], m[2][1]],
-        [m[0][2], m[1][2], m[2][2]],
-    ]
-}
-
-pub fn mult_3x3_3x1(m1: &[[f64;3];3], m2: &[f64;3]) -> [f64;3] {
-    // Multiplies a 3x3 matrix and a 3x1 matrix
-    [
-        m1[0][0] * m2[0] + m1[0][1] * m2[1] + m1[0][2] * m2[2],
-        m1[1][0] * m2[0] + m1[1][1] * m2[1] + m1[1][2] * m2[2],
-        m1[2][0] * m2[0] + m1[2][1] * m2[1] + m1[2][2] * m2[2],
-    ]
-}
-
-pub fn quat_to_rot (q: [f64;4]) -> [[f64;3];3] {
-    // Converts Quaternions to a 3x3 rotation matrix
-     let [qw, qx, qy, qz] = &q;
-
-    [
-        [1.0 - 2.0 * ( qy * qy + qz * qz), 2.0 * (qx * qy - qz * qw), 2.0 * (qx * qz + qy * qw)],
-        [2.0 * (qx * qy + qz * qw), 1.0 - 2.0 * (qx * qx + qz * qz), 2.0 * (qy * qz - qx * qw)],
-        [2.0 * (qx * qz - qy * qw), 2.0 * (qy * qz + qx * qw), 1.0 - 2.0 * (qx * qx + qy * qy)]
-    ]
-}
 //================================================
 // Acceleration models to be applied to bodies or spacecraft
 
@@ -42,11 +12,12 @@ pub trait AccelModel: Send + Sync {
 
     // "Models" are the types of acceleration being applied
     fn compute_accel(&self, pos: &[f64;3], vel: &[f64;3]) -> [f64;3]; // Output [f64;3] is the global 3d cartesian acceleration vector
+    fn as_any(&self) -> &dyn Any; // Used to reference or inspect the model 
     fn as_any_mut(&mut self) -> &mut dyn Any; // Used to dynamically update the acceleration model's inputs
+    fn target_id(&self) -> u32; // ID of the attracting body; equal to the object's own ID if the model has no attracting body (ex: thrust)
     fn name(&self) -> &'static str; // Used only for debug
 
 }
-
 
 //================================================
 // Simple Point Mass Gravitation Acceleration
@@ -60,7 +31,8 @@ pub struct PointGravity{
     #[pyo3(get, set)]
     pub body_pos: [f64;3], // Position vector of the attracting body
     #[pyo3 (get, set)]
-    pub attractor_id: u32, // ID of the attracting body
+    pub attractor_id: u32, // ID of the attracting body 
+                           // (list built in Python, must start at 1, since 0 denotes a non-gravitational acceleration)
 }
 
 #[pymethods]
@@ -90,9 +62,16 @@ impl AccelModel for PointGravity {
 
     fn name(&self) -> &'static str{"PointGravity"} // Outputs the model type; used only for debug
 
+    fn as_any(&self) -> &dyn Any {self}
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
-    } // dynamically updates model whenever this function is called
+    } // can dynamically updates model whenever this function is called
+
+    fn target_id(&self) -> u32 {
+        // Returns the attractor ID for the given model
+        self.attractor_id
+    }
     }
 
 
@@ -116,7 +95,7 @@ pub struct J2 {
     pub j2: f64,
     // J2 factor for the attracting body
     #[pyo3(get, set)]
-    pub rot_ax_dir: [f64;4],
+    pub rot_mat: [[f64;3];3],
     // Direction and phase of the planet's rotation axis relative to the origin (eccliptic); Described with a unit quaternion
     #[pyo3(get, set)]
     pub attractor_id: u32, 
@@ -126,14 +105,14 @@ pub struct J2 {
 #[pymethods]
 impl J2 {
     #[new]
-    pub fn new(mu: f64, body_pos: [f64;3], r_eq: f64, j2: f64, rot_ax_dir: [f64;4], attractor_id: u32) -> Self {
-        J2 { mu, body_pos, r_eq, j2, rot_ax_dir, attractor_id}
+    pub fn new(mu: f64, body_pos: [f64;3], r_eq: f64, j2: f64, rot_mat: [[f64;3];3], attractor_id: u32) -> Self {
+        J2 { mu, body_pos, r_eq, j2, rot_mat, attractor_id}
     }
 }
 
 impl AccelModel for J2 {
     fn compute_accel(&self, pos: &[f64;3], _vel: &[f64;3]) -> [f64;3] {
-        let J2 { mu, body_pos, r_eq, j2, rot_ax_dir, attractor_id: _u32} = *self; 
+        let J2 { mu, body_pos, r_eq, j2, rot_mat, attractor_id: _u32} = *self; 
         // Pulling useful variables
         let [rx, ry, rz] = [pos[0] - body_pos[0], pos[1] - body_pos[1], pos[2] - body_pos[2]];
         // computes the relative x y z position between the attracting body and given object
@@ -144,9 +123,7 @@ impl AccelModel for J2 {
         if r == 0.0 { return [0.0,0.0,0.0];}
         // if one object is inside the other return 0 accel. This should never occur but idk this might prevent (or cause) a bug
 
-        let rot_mat = quat_to_rot(rot_ax_dir); // Converting quaternion into rotation matrix
-
-        let trans_rot_mat = transpose_3x3(&rot_mat); // Transpose of rotation matrix
+        let trans_rot_mat = transpose_3x3(&rot_mat);
 
         let [rx, ry, rz] = mult_3x3_3x1(&trans_rot_mat, &[rx, ry, rz]);
         // Rotates the global coordinate system relative position into the local planet's coordinate system 
@@ -172,9 +149,16 @@ impl AccelModel for J2 {
     }
     fn name(&self) -> &'static str {"J2"} // Only for debug; unused currently 
 
+    fn as_any(&self) -> &dyn Any {self} // For referencing the model
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     } // Used to dynamically update J2 model parameters
+
+    fn target_id(&self) -> u32 {
+        // Returns the ID of the attracting body
+        self.attractor_id
+    }
 }
 
 
@@ -187,7 +171,7 @@ impl AccelModel for J2 {
 // SIMULTANEOUSLY ACTIVE ALONGSIDE A POINT GRAVITY
 // MODEL; UPON CLOSE APPROACH TO A 'LUMPY MOON' THE
 // POINT GRAVITY SHOULD BE TRIMMED AND THE MASCON 
-// MODEL APPLIED   
+// MODEL APPLIED WITHIN PYTHON
 //=================================================
 
 #[pyclass(from_py_object)]
@@ -206,7 +190,7 @@ pub struct Mascons {
     pub con_mag: Vec<f64>,
     // Corresponding magnitudes of the mascons, as a percentage of the body's mass
     #[pyo3(get,set)]
-    pub rot_ax_dir: [f64;4],
+    pub rot_mat: [[f64;3];3],
     // Direction and phase of the planet's rotation axis relative to the origin (eccliptic); Described with a unit quaternion
     #[pyo3(get,set)]
     pub attractor_id: u32
@@ -216,23 +200,21 @@ pub struct Mascons {
 #[pymethods]
 impl Mascons {
     #[new]
-    pub fn new(mu:f64, body_pos: [f64;3], con_pos: Vec<[f64;3]>, con_mag: Vec<f64>, rot_ax_dir: [f64;4], attractor_id: u32) -> Self {
-        Mascons {mu, body_pos, con_pos, con_mag, rot_ax_dir, attractor_id}
+    pub fn new(mu:f64, body_pos: [f64;3], con_pos: Vec<[f64;3]>, con_mag: Vec<f64>, rot_mat: [[f64;3];3], attractor_id: u32) -> Self {
+        Mascons {mu, body_pos, con_pos, con_mag, rot_mat, attractor_id}
     }
 }
 
 impl AccelModel for Mascons {
     fn compute_accel(&self, pos: &[f64;3], _vel: &[f64;3]) -> [f64;3] {
-        let Mascons {mu, body_pos, ref con_pos, ref con_mag, rot_ax_dir, attractor_id: _u32} = *self;
+        let Mascons {mu, body_pos, ref con_pos, ref con_mag, rot_mat, attractor_id: _u32} = *self;
 
         let mut accel_part = [0.0,0.0,0.0];
         let mut point_mass_mu = mu;
 
-        let R = quat_to_rot(rot_ax_dir);
-
         for (idx, con) in con_pos.iter().enumerate() {
 
-            let local_con_pos = mult_3x3_3x1(&R,  con);
+            let local_con_pos = mult_3x3_3x1(&rot_mat,  con);
 
             let [rx, ry, rz] = [
                                                 pos[0] - (local_con_pos[0] + body_pos[0]),
@@ -284,9 +266,16 @@ impl AccelModel for Mascons {
 
     fn name(&self) -> &'static str{"Mascons"} // Outputs the model type; used only for debug
 
+    fn as_any(&self) -> &dyn Any {self} // For referencing
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     } // dynamically updates model whenever this function is called
+
+    fn target_id(&self) -> u32 {
+        // Returns the ID of the attracting body
+        self.attractor_id
+    }
 
 }
 
@@ -304,21 +293,24 @@ pub struct Burn {
     pub thrust_vec: [f64;3],
     // 3d thrust unit vector 
     #[pyo3(get, set)]
-    pub mass: f64
+    pub mass: f64,
     // Mass of the spacecraft at the given timestep
+    #[pyo3(get, set)]
+    pub craft_id: u32
+    // Craft's own ID (used to trim accel model as needed)
 }
 
 #[pymethods]
 impl Burn {
     #[new]
-    pub fn new(thrust_mag:f64, thrust_vec:[f64;3], mass:f64) -> Self {
-        Burn {thrust_mag, thrust_vec, mass}
+    pub fn new(thrust_mag:f64, thrust_vec:[f64;3], mass: f64, craft_id: u32) -> Self {
+        Burn {thrust_mag, thrust_vec, mass, craft_id}
     }
 }
 
 impl AccelModel for Burn {
     fn compute_accel(&self, _pos: &[f64;3], _vel: &[f64;3]) -> [f64;3] {
-        let Burn {thrust_mag, thrust_vec, mass} = *self;
+        let Burn {thrust_mag, thrust_vec, mass, craft_id: _u32 } = *self;
         // It's all F = ma ? 
         // Always has been
         [
@@ -331,7 +323,13 @@ impl AccelModel for Burn {
     
     fn name(&self) -> &'static str{"Burn"} // Outputs the model type; used only for debug
 
+    fn as_any(&self) -> &dyn Any {self} // For referencing 
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     } // dynamically updates model whenever this function is called
+
+    fn target_id(&self) -> u32 {
+        self.craft_id // Return's the object's own ID as it's "target"
+    }
 }
