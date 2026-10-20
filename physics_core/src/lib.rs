@@ -41,6 +41,14 @@ impl StateVector { // Function that sets a Rust accessible StateVector object ba
     }
 }
 
+#[pymethods]
+impl RotationalState {
+    #[new]
+    fn new(quat: [f64;4], omega: [f64;3]) -> Self {
+        RotationalState { quat, omega }
+    }
+}
+
 #[pymodule]
 #[pyo3(name = "physics_core")]
 fn physics_core(m: &Bound<'_, PyModule>) -> PyResult <()> {
@@ -49,6 +57,7 @@ fn physics_core(m: &Bound<'_, PyModule>) -> PyResult <()> {
     m.add_class::<Mascons>()?;
     m.add_class::<Burn>()?;
     m.add_class::<StateVector>()?;
+    m.add_class::<RotationalState>()?;
     m.add_class::<WorldState>()?;
     
     Ok(())

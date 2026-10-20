@@ -16,7 +16,6 @@ pub trait AccelModel: Send + Sync {
     fn as_any_mut(&mut self) -> &mut dyn Any; // Used to dynamically update the acceleration model's inputs
     fn target_id(&self) -> u32; // ID of the attracting body; equal to the object's own ID if the model has no attracting body (ex: thrust)
     fn name(&self) -> &'static str; // Used only for debug
-
 }
 
 //================================================
@@ -147,6 +146,7 @@ impl AccelModel for J2 {
         // Rotates J2 accel from local frame back into global frame
 
     }
+    
     fn name(&self) -> &'static str {"J2"} // Only for debug; unused currently 
 
     fn as_any(&self) -> &dyn Any {self} // For referencing the model

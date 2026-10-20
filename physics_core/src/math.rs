@@ -1,6 +1,4 @@
-
-// Helper functions ( will move to a new module eventually )
-
+// Helper functions
 pub fn transpose_3x3(m: &[[f64;3];3]) -> [[f64;3];3] {
     // Transposes a 3x3 matrix
     [
