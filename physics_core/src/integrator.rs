@@ -1,26 +1,9 @@
-use crate::RotationalState;
-use crate::StateVector;
-use crate::acceleration::{AccelModel, Burn, J2, Mascons, PointGravity};
-use crate::math::{quat_evolve, quat_to_rot};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use rayon::prelude::*;
-
-pub struct Object {
-    pub id: u32,                          // Unique object ID
-    pub name: String,                     // Object name
-    pub ob_type: bool,                    // type of object, boolean, 1 for body 0 for spacecraft
-    pub state: StateVector,               // Position & Velocity
-    pub rot_state: RotationalState,       // Orientation & Angular velocity
-    pub models: Vec<Box<dyn AccelModel>>, // Applicable acceleration models for the object
-}
-
-#[pyclass]
-pub struct WorldState {
-    pub objects: Vec<Object>,
-    // WorldState is a vec<> of variable length that contains all objects (spacecraft and bodies) in the system
-    // Each object holds its state and its relevant force models,
-}
+use crate::acceleration::{AccelModel, Burn, J2, Mascons, PointGravity};
+use crate::types::{WorldState, RotationalState, StateVector, Object};
+use crate::math::{quat_evolve};
 
 #[pymethods]
 impl WorldState {
@@ -92,9 +75,6 @@ impl WorldState {
                 dt,
             );
 
-            // Compute rotation matrix from quaternion
-            let rot_mat = quat_to_rot(obj.rot_state.quat);
-
             // Update each model attached to this object ---
             for model in &mut obj.models {
                 // PointGravity
@@ -109,7 +89,6 @@ impl WorldState {
                     if let Some(new_pos) = positions.get(&j2.attractor_id) {
                         j2.body_pos = *new_pos;
                     }
-                    j2.rot_mat = rot_mat;
                 }
                 
                 // Mascons
@@ -117,14 +96,14 @@ impl WorldState {
                     if let Some(new_pos) = positions.get(&mascon.attractor_id) {
                         mascon.body_pos = *new_pos
                 }
-                mascon.rot_mat = rot_mat;
                 }
 
-                // Burn logic is handled in Python
+                // Burn logic is handled in Python for now
                 
             }
         }
     }
+
     #[pyo3(name = "Graft_Model")]
     pub fn graft_model(
         &mut self,
@@ -157,7 +136,6 @@ impl WorldState {
                 "Unsupported AccelModel passed to graft_model",
             ));
         }
-
         Ok(())
     }
 
@@ -215,95 +193,98 @@ impl WorldState {
         py.detach(move || {
             objects.par_iter_mut().for_each(|object| {
                 // Par_iter_mut to parallelize the operations; much faster than single thread for multi body systems
-                if object.name == "Gas Giant Prime" {
-                    return;
-                } // Does not apply any acceleration to the Gas Giant; 
-                // Will likely replace this with the system barycenter later on
 
                 rk4_sv_mutate(
                     // Applies the RK4 algorithm to mutate the state vectors of each object
                     &object.models,
-                    &mut object.state.position,
-                    &mut object.state.velocity,
+                    &mut object.state,
+                    &mut object.rot_state,
                     dt,
                 );
             });
         });
     }
-    pub fn get_state(&self, id: u32) -> Option<StateVector> {
+
+    pub fn get_state(&self, id: u32) -> Option<(StateVector, RotationalState)> {
         // Pulls the current state of an object given it's ID
         self.objects
             .iter()
             .find(|obj| obj.id == id)
-            .map(|obj| obj.state.clone())
+            .map(|obj| (obj.state.clone(), obj.rot_state.clone()))
     }
 }
 
 // RK4 state vector mutation based on all applicable acceleration models
 pub fn rk4_sv_mutate(
     models: &[Box<dyn AccelModel>],
-    pos: &mut [f64; 3], // Mutable borrow of this value: the function simply mutates it in place without need for a return
-    vel: &mut [f64; 3], // """
+    sv: &mut StateVector,
+    rs: &mut RotationalState,
     dt: f64,
 ) {
-    let accel_at = |p: &[f64; 3], v: &[f64; 3]| -> [f64; 3] {
+    // evaluatew total acceleration at a given probe point and sub-step dt
+    let accel_at = |pos: &[f64; 3], vel: &[f64; 3], sub_dt: f64| -> [f64; 3] {
+        let temp_sv = StateVector {
+            position: *pos,
+            velocity: *vel,
+        };
         let mut total_a = [0.0, 0.0, 0.0];
         for model in models {
-            let a = model.compute_accel(p, v);
+            let a = model.compute_accel(&temp_sv, rs, sub_dt);
             total_a[0] += a[0];
             total_a[1] += a[1];
             total_a[2] += a[2];
-            //println!("model {:?} accel = {:?}", model.name(), a) //debug print statement; currently unused
         }
-        total_a // Sums all the applicable acceleration on a given body
+        total_a
     };
-    // k1
-    let pos_k1 = *pos;
-    let vel_k1 = *vel;
-    let accel_k1 = accel_at(&pos_k1, &vel_k1);
 
-    //k2
+    let p0 = sv.position;
+    let v0 = sv.velocity;
+
+    // k1 (uses full dt)
+    let accel_k1 = accel_at(&p0, &v0, dt);
+
+    // k2 (uses half dt)
     let pos_k2 = [
-        pos_k1[0] + 0.5 * dt * vel_k1[0],
-        pos_k1[1] + 0.5 * dt * vel_k1[1],
-        pos_k1[2] + 0.5 * dt * vel_k1[2],
+        p0[0] + 0.5 * dt * v0[0],
+        p0[1] + 0.5 * dt * v0[1],
+        p0[2] + 0.5 * dt * v0[2],
     ];
     let vel_k2 = [
-        vel_k1[0] + 0.5 * dt * accel_k1[0],
-        vel_k1[1] + 0.5 * dt * accel_k1[1],
-        vel_k1[2] + 0.5 * dt * accel_k1[2],
+        v0[0] + 0.5 * dt * accel_k1[0],
+        v0[1] + 0.5 * dt * accel_k1[1],
+        v0[2] + 0.5 * dt * accel_k1[2],
     ];
-    let accel_k2 = accel_at(&pos_k2, &vel_k2);
+    let accel_k2 = accel_at(&pos_k2, &vel_k2, 0.5 * dt);
 
-    //k3
+    // k3 (uses half dt)
     let pos_k3 = [
-        pos_k1[0] + 0.5 * dt * vel_k2[0],
-        pos_k1[1] + 0.5 * dt * vel_k2[1],
-        pos_k1[2] + 0.5 * dt * vel_k2[2],
+        p0[0] + 0.5 * dt * vel_k2[0],
+        p0[1] + 0.5 * dt * vel_k2[1],
+        p0[2] + 0.5 * dt * vel_k2[2],
     ];
     let vel_k3 = [
-        vel_k1[0] + 0.5 * dt * accel_k2[0],
-        vel_k1[1] + 0.5 * dt * accel_k2[1],
-        vel_k1[2] + 0.5 * dt * accel_k2[2],
+        v0[0] + 0.5 * dt * accel_k2[0],
+        v0[1] + 0.5 * dt * accel_k2[1],
+        v0[2] + 0.5 * dt * accel_k2[2],
     ];
-    let accel_k3 = accel_at(&pos_k3, &vel_k3);
+    let accel_k3 = accel_at(&pos_k3, &vel_k3, 0.5 * dt);
 
-    // k4
+    // k4 (uses full dt)
     let pos_k4 = [
-        pos_k1[0] + dt * vel_k3[0],
-        pos_k1[1] + dt * vel_k3[1],
-        pos_k1[2] + dt * vel_k3[2],
+        p0[0] + dt * vel_k3[0],
+        p0[1] + dt * vel_k3[1],
+        p0[2] + dt * vel_k3[2],
     ];
     let vel_k4 = [
-        vel_k1[0] + dt * accel_k3[0],
-        vel_k1[1] + dt * accel_k3[1],
-        vel_k1[2] + dt * accel_k3[2],
+        v0[0] + dt * accel_k3[0],
+        v0[1] + dt * accel_k3[1],
+        v0[2] + dt * accel_k3[2],
     ];
-    let accel_k4 = accel_at(&pos_k4, &vel_k4);
+    let accel_k4 = accel_at(&pos_k4, &vel_k4, dt);
 
-    // Combine k1..k4 weighted sums
+    // Combine k1..k4 weighted sums and mutate sv in place
     for i in 0..3 {
-        pos[i] += (dt / 6.0) * (vel_k1[i] + 2.0 * vel_k2[i] + 2.0 * vel_k3[i] + vel_k4[i]);
-        vel[i] += (dt / 6.0) * (accel_k1[i] + 2.0 * accel_k2[i] + 2.0 * accel_k3[i] + accel_k4[i]);
+        sv.position[i] += (dt / 6.0) * (v0[i] + 2.0 * vel_k2[i] + 2.0 * vel_k3[i] + vel_k4[i]);
+        sv.velocity[i] += (dt / 6.0) * (accel_k1[i] + 2.0 * accel_k2[i] + 2.0 * accel_k3[i] + accel_k4[i]);
     }
 }

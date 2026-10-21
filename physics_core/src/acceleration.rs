@@ -1,6 +1,10 @@
 use pyo3::prelude::*;
 use std::any::Any;
-use crate::math::{transpose_3x3, mult_3x3_3x1,};
+use crate::{
+    StateVector,
+    RotationalState,
+    math::{mult_3x3_3x1, transpose_3x3, quat_to_rot}
+};
 
 //================================================
 // Acceleration models to be applied to bodies or spacecraft
@@ -11,7 +15,7 @@ pub trait AccelModel: Send + Sync {
     // for each model.
 
     // "Models" are the types of acceleration being applied
-    fn compute_accel(&self, pos: &[f64;3], vel: &[f64;3]) -> [f64;3]; // Output [f64;3] is the global 3d cartesian acceleration vector
+    fn compute_accel(&self, sv: &StateVector, rs: &RotationalState, dt:f64) -> [f64;3]; // Output [f64;3] is the global 3d cartesian acceleration vector
     fn as_any(&self) -> &dyn Any; // Used to reference or inspect the model 
     fn as_any_mut(&mut self) -> &mut dyn Any; // Used to dynamically update the acceleration model's inputs
     fn target_id(&self) -> u32; // ID of the attracting body; equal to the object's own ID if the model has no attracting body (ex: thrust)
@@ -43,7 +47,8 @@ impl PointGravity {
 }
 
 impl AccelModel for PointGravity {
-    fn compute_accel(&self, pos: &[f64;3], _vel: &[f64;3]) -> [f64;3] {
+    fn compute_accel(&self, sv: &StateVector, _rs: &RotationalState, _dt:f64) -> [f64;3] {
+        let pos = sv.position;
         // computes the relative x y z position vector between the attracting body and the given object
         let [rx, ry, rz] = [pos[0] - self.body_pos[0], pos[1] - self.body_pos[1], pos[2] - self.body_pos[2]];
         // computes the square of the vector
@@ -94,9 +99,6 @@ pub struct J2 {
     pub j2: f64,
     // J2 factor for the attracting body
     #[pyo3(get, set)]
-    pub rot_mat: [[f64;3];3],
-    // Direction and phase of the planet's rotation axis relative to the origin (eccliptic); Described with a unit quaternion
-    #[pyo3(get, set)]
     pub attractor_id: u32, 
     // ID of the attracting body
 }
@@ -104,14 +106,18 @@ pub struct J2 {
 #[pymethods]
 impl J2 {
     #[new]
-    pub fn new(mu: f64, body_pos: [f64;3], r_eq: f64, j2: f64, rot_mat: [[f64;3];3], attractor_id: u32) -> Self {
-        J2 { mu, body_pos, r_eq, j2, rot_mat, attractor_id}
+    pub fn new(mu: f64, body_pos: [f64;3], r_eq: f64, j2: f64, attractor_id: u32) -> Self {
+        J2 { mu, body_pos, r_eq, j2, attractor_id}
     }
 }
 
 impl AccelModel for J2 {
-    fn compute_accel(&self, pos: &[f64;3], _vel: &[f64;3]) -> [f64;3] {
-        let J2 { mu, body_pos, r_eq, j2, rot_mat, attractor_id: _u32} = *self; 
+    fn compute_accel(&self, sv: &StateVector, rs: &RotationalState, _dt: f64) -> [f64;3] {
+        let pos = sv.position;
+        // Pulling the position from the state vector
+        let rot_mat = quat_to_rot(rs.quat);
+        // Computes the rotation matrix from the body's quaternion
+        let J2 { mu, body_pos, r_eq, j2, attractor_id: _u32} = *self; 
         // Pulling useful variables
         let [rx, ry, rz] = [pos[0] - body_pos[0], pos[1] - body_pos[1], pos[2] - body_pos[2]];
         // computes the relative x y z position between the attracting body and given object
@@ -190,9 +196,6 @@ pub struct Mascons {
     pub con_mag: Vec<f64>,
     // Corresponding magnitudes of the mascons, as a percentage of the body's mass
     #[pyo3(get,set)]
-    pub rot_mat: [[f64;3];3],
-    // Direction and phase of the planet's rotation axis relative to the origin (eccliptic); Described with a unit quaternion
-    #[pyo3(get,set)]
     pub attractor_id: u32
     // ID of the attracting body
 }
@@ -200,15 +203,25 @@ pub struct Mascons {
 #[pymethods]
 impl Mascons {
     #[new]
-    pub fn new(mu:f64, body_pos: [f64;3], con_pos: Vec<[f64;3]>, con_mag: Vec<f64>, rot_mat: [[f64;3];3], attractor_id: u32) -> Self {
-        Mascons {mu, body_pos, con_pos, con_mag, rot_mat, attractor_id}
+    pub fn new(mu:f64, body_pos: [f64;3], con_pos_list: Vec<Vec<f64>>, con_mag: Vec<f64>, attractor_id: u32) -> Self {
+        let mut con_pos = Vec::with_capacity(con_pos_list.len());
+        for row in con_pos_list {
+            /*  Error message throws an error rn so I have to fix this
+            if row.len() != 3{
+                return Err("Each Element in con_pos must be a list of length 3");
+            }
+            */
+            con_pos.push([row[0],row[1],row[2]]);
+        }
+        Mascons {mu, body_pos, con_pos, con_mag, attractor_id} 
     }
 }
 
 impl AccelModel for Mascons {
-    fn compute_accel(&self, pos: &[f64;3], _vel: &[f64;3]) -> [f64;3] {
-        let Mascons {mu, body_pos, ref con_pos, ref con_mag, rot_mat, attractor_id: _u32} = *self;
-
+    fn compute_accel(&self, sv:&StateVector, rs:&RotationalState, _dt:f64) -> [f64;3] {
+        let pos = sv.position;
+        let rot_mat = quat_to_rot(rs.quat);
+        let Mascons {mu, body_pos, ref con_pos, ref con_mag, attractor_id: _u32} = *self;
         let mut accel_part = [0.0,0.0,0.0];
         let mut point_mass_mu = mu;
 
@@ -295,6 +308,9 @@ pub struct Burn {
     #[pyo3(get, set)]
     pub mass: f64,
     // Mass of the spacecraft at the given timestep
+    #[pyo3(get,set)]
+    pub m_dot: f64,
+    // Mass flowrate of the propellant during the burn
     #[pyo3(get, set)]
     pub craft_id: u32
     // Craft's own ID (used to trim accel model as needed)
@@ -303,20 +319,24 @@ pub struct Burn {
 #[pymethods]
 impl Burn {
     #[new]
-    pub fn new(thrust_mag:f64, thrust_vec:[f64;3], mass: f64, craft_id: u32) -> Self {
-        Burn {thrust_mag, thrust_vec, mass, craft_id}
+    pub fn new(thrust_mag:f64, thrust_vec:[f64;3], mass: f64, m_dot:f64, craft_id: u32) -> Self {
+        Burn {thrust_mag, thrust_vec, mass, m_dot, craft_id}
     }
 }
 
 impl AccelModel for Burn {
-    fn compute_accel(&self, _pos: &[f64;3], _vel: &[f64;3]) -> [f64;3] {
-        let Burn {thrust_mag, thrust_vec, mass, craft_id: _u32 } = *self;
+    fn compute_accel(&self, _sv:&StateVector, _rs:&RotationalState, dt:f64) -> [f64;3] {
+        let Burn {thrust_mag, thrust_vec, mass, m_dot, craft_id: _u32 } = *self;
         // It's all F = ma ? 
         // Always has been
+
+        let current_mass = mass - (m_dot * dt);
+        let eff_mass = if current_mass > 0.0 { current_mass } else { f64::MIN_POSITIVE };
+
         [
-            (thrust_mag * thrust_vec[0]) / mass,
-            (thrust_mag * thrust_vec[1]) / mass,
-            (thrust_mag * thrust_vec[2]) / mass
+            (thrust_mag * thrust_vec[0]) / eff_mass,
+            (thrust_mag * thrust_vec[1]) / eff_mass,
+            (thrust_mag * thrust_vec[2]) / eff_mass
         ]
     }
 
