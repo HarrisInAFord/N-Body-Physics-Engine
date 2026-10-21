@@ -92,9 +92,6 @@ impl WorldState {
             let objects = &mut self.objects;
             py.detach(move|| {
             objects.par_iter_mut().for_each(|object| { // Par_iter_mut to parallelize the operations; much faster than single thread for multi body systems
-                if object.name == "Gas Giant Prime" {return;} // Does not apply any acceleration to the Gas Giant; 
-                                                              // Will likely replace this with the system barycenter later on
-                
                 rk4_sv_mutate( // Applies the RK4 algorithm to mutate the state vectors of each object
                     &object.models,
                     &mut object.state.position,
