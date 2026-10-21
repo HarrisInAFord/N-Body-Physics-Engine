@@ -169,7 +169,7 @@ for name in objs_horz:
     dec = params["Dec_deg"]
     period = params["sid_per_days"]
 
-    ax_vec = axis_from_ra_dec(ra, dec )
+    ax_vec = axis_from_ra_dec(ra, dec)
     ax_quat = quat_from_2_vec(np.array([0.0,0.0,1.0]),ax_vec)
     w = omega_vector_from_ra_dec_period(ra, dec, period)
 
