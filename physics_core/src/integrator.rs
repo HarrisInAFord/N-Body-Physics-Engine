@@ -188,14 +188,11 @@ impl WorldState {
 
     pub fn step_all(&mut self, py: Python<'_>, dt: f64) {
         // This is a simply function called in python that mutates the state vector of all the objects with only the input of the time step
-        self.update_models_from_objects(dt);
-        let objects = &mut self.objects;
-        py.detach(move || {
-            objects.par_iter_mut().for_each(|object| {
-                // Par_iter_mut to parallelize the operations; much faster than single thread for multi body systems
-
-                rk4_sv_mutate(
-                    // Applies the RK4 algorithm to mutate the state vectors of each object
+        self.update_models_from_objects();
+            let objects = &mut self.objects;
+            py.detach(move|| {
+            objects.par_iter_mut().for_each(|object| { // Par_iter_mut to parallelize the operations; much faster than single thread for multi body systems
+                rk4_sv_mutate( // Applies the RK4 algorithm to mutate the state vectors of each object
                     &object.models,
                     &mut object.state,
                     &mut object.rot_state,
