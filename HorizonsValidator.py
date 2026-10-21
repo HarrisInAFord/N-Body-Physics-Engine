@@ -203,7 +203,7 @@ for obj in world_states.values():
         r_eq = other["data"]["radius_eq_m"]
         rot_mat = rotation_matrix_from_ra_dec(other["data"]["RA_deg"], other["data"]["Dec_deg"])
         obj["models"].append(
-            physics_core.J2(mu, other["sv"].position, r_eq, j2, rot_mat, attractor_id)
+            physics_core.J2(mu, other["sv"].position, r_eq, j2, attractor_id)
         )
 
 # Adds the models to the objects in the world state
@@ -224,7 +224,7 @@ sim_trajectories = {name: [] for name in world_states.keys()}
 # Record t = 0
 for obj in world_states.values():
     state = ws.get_state(obj["id"])
-    sim_trajectories[obj["name"]].append(list(state.position))
+    sim_trajectories[obj["name"]].append(list(state[0].position))
 
 # Step the RK4 N-Body integrator by dt until it has evaluated the same time span as Horizons
 for step in tqdm(range(1, num_steps)):  
@@ -232,7 +232,7 @@ for step in tqdm(range(1, num_steps)):
         ws.step_all(dt)
     for obj in world_states.values():
         state = ws.get_state(obj["id"])
-        sim_trajectories[obj["name"]].append(list(state.position))
+        sim_trajectories[obj["name"]].append(list(state[0].position))
 
 # Convert to arrays
 for name in sim_trajectories:
