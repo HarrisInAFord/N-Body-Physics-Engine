@@ -188,14 +188,17 @@ impl WorldState {
 
     pub fn step_all(&mut self, py: Python<'_>, dt: f64) {
         // This is a simply function called in python that mutates the state vector of all the objects with only the input of the time step
-        self.update_models_from_objects();
-            let objects = &mut self.objects;
-            py.detach(move|| {
-            objects.par_iter_mut().for_each(|object| { // Par_iter_mut to parallelize the operations; much faster than single thread for multi body systems
-                rk4_sv_mutate( // Applies the RK4 algorithm to mutate the state vectors of each object
+        self.update_models_from_objects(dt);
+        let ws = self.clone();
+        py.detach(move || {
+            self.objects.par_iter_mut().for_each(|object| {
+                // Par_iter_mut to parallelize the operations; much faster than single thread for multi body systems
+                rk4_sv_mutate(
+                    // Applies the RK4 algorithm to mutate the state vectors of each object
                     &object.models,
                     &mut object.state,
                     &mut object.rot_state,
+                    &ws,
                     dt,
                 );
             });
@@ -212,10 +215,11 @@ impl WorldState {
 }
 
 // RK4 state vector mutation based on all applicable acceleration models
-pub fn rk4_sv_mutate(
+fn rk4_sv_mutate(
     models: &[Box<dyn AccelModel>],
     sv: &mut StateVector,
     rs: &mut RotationalState,
+    ws: &WorldState,
     dt: f64,
 ) {
     // evaluatew total acceleration at a given probe point and sub-step dt
@@ -226,7 +230,7 @@ pub fn rk4_sv_mutate(
         };
         let mut total_a = [0.0, 0.0, 0.0];
         for model in models {
-            let a = model.compute_accel(&temp_sv, rs, sub_dt);
+            let a = model.compute_accel(&temp_sv, rs, ws, sub_dt);
             total_a[0] += a[0];
             total_a[1] += a[1];
             total_a[2] += a[2];

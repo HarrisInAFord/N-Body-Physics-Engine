@@ -1,21 +1,23 @@
 use pyo3::prelude::*;
 use std::any::Any;
+use dyn_clone::DynClone;
 use crate::{
     StateVector,
     RotationalState,
+    WorldState,
     math::{mult_3x3_3x1, transpose_3x3, quat_to_rot}
 };
 
 //================================================
 // Acceleration models to be applied to bodies or spacecraft
 
-pub trait AccelModel: Send + Sync {
+pub trait AccelModel: Send + Sync + DynClone {
     // Computes the 3D acceleration vector 
     // given a position and velocity
     // for each model.
 
     // "Models" are the types of acceleration being applied
-    fn compute_accel(&self, sv: &StateVector, rs: &RotationalState, dt:f64) -> [f64;3]; // Output [f64;3] is the global 3d cartesian acceleration vector
+    fn compute_accel(&self, sv: &StateVector, rs: &RotationalState, ws: &WorldState, dt:f64) -> [f64;3]; // Output [f64;3] is the global 3d cartesian acceleration vector
     fn as_any(&self) -> &dyn Any; // Used to reference or inspect the model 
     fn as_any_mut(&mut self) -> &mut dyn Any; // Used to dynamically update the acceleration model's inputs
     fn target_id(&self) -> u32; // ID of the attracting body; equal to the object's own ID if the model has no attracting body (ex: thrust)
@@ -47,7 +49,7 @@ impl PointGravity {
 }
 
 impl AccelModel for PointGravity {
-    fn compute_accel(&self, sv: &StateVector, _rs: &RotationalState, _dt:f64) -> [f64;3] {
+    fn compute_accel(&self, sv: &StateVector, _rs: &RotationalState, _ws:&WorldState, _dt:f64) -> [f64;3] {
         let pos = sv.position;
         // computes the relative x y z position vector between the attracting body and the given object
         let [rx, ry, rz] = [pos[0] - self.body_pos[0], pos[1] - self.body_pos[1], pos[2] - self.body_pos[2]];
@@ -112,10 +114,11 @@ impl J2 {
 }
 
 impl AccelModel for J2 {
-    fn compute_accel(&self, sv: &StateVector, rs: &RotationalState, _dt: f64) -> [f64;3] {
+    fn compute_accel(&self, sv: &StateVector, _rs: &RotationalState, ws:&WorldState, _dt: f64) -> [f64;3] {
         let pos = sv.position;
         // Pulling the position from the state vector
-        let rot_mat = quat_to_rot(rs.quat);
+        let attractor_quat = ws.get_state(self.attractor_id).unwrap().1.quat;
+        let rot_mat = quat_to_rot(attractor_quat);
         // Computes the rotation matrix from the body's quaternion
         let J2 { mu, body_pos, r_eq, j2, attractor_id: _u32} = *self; 
         // Pulling useful variables
@@ -218,9 +221,10 @@ impl Mascons {
 }
 
 impl AccelModel for Mascons {
-    fn compute_accel(&self, sv:&StateVector, rs:&RotationalState, _dt:f64) -> [f64;3] {
+    fn compute_accel(&self, sv:&StateVector, _rs:&RotationalState, ws:&WorldState, _dt:f64) -> [f64;3] {
         let pos = sv.position;
-        let rot_mat = quat_to_rot(rs.quat);
+        let attractor_quat = ws.get_state(self.attractor_id).unwrap().1.quat;
+        let rot_mat = quat_to_rot(attractor_quat);
         let Mascons {mu, body_pos, ref con_pos, ref con_mag, attractor_id: _u32} = *self;
         let mut accel_part = [0.0,0.0,0.0];
         let mut point_mass_mu = mu;
@@ -325,7 +329,7 @@ impl Burn {
 }
 
 impl AccelModel for Burn {
-    fn compute_accel(&self, _sv:&StateVector, _rs:&RotationalState, dt:f64) -> [f64;3] {
+    fn compute_accel(&self, _sv:&StateVector, _rs:&RotationalState, _ws:&WorldState, dt:f64) -> [f64;3] {
         let Burn {thrust_mag, thrust_vec, mass, m_dot, craft_id: _u32 } = *self;
         // It's all F = ma ? 
         // Always has been

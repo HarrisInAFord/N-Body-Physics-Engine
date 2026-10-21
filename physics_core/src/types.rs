@@ -1,5 +1,7 @@
 use pyo3::prelude::*;
 use crate::acceleration::AccelModel;
+use dyn_clone;
+dyn_clone::clone_trait_object!(AccelModel);
 
 #[pyclass (from_py_object)]
 #[derive(Clone)]
@@ -38,8 +40,7 @@ impl RotationalState {
     }
 }
 
-
-
+#[derive(Clone)]
 pub struct Object {
     pub id: u32,                          // Unique object ID
     pub name: String,                     // Object name
@@ -49,7 +50,8 @@ pub struct Object {
     pub models: Vec<Box<dyn AccelModel>>, // Applicable acceleration models for the object
 }
 
-#[pyclass]
+#[derive(Clone)]
+#[pyclass(from_py_object)]
 pub struct WorldState {
     pub objects: Vec<Object>,
     // WorldState is a vec<> of variable length that contains all objects (spacecraft and bodies) in the system
