@@ -16,12 +16,21 @@ Unless otherwise noted, values are in MKS units and vectors are in a global cart
 - models: `Vec<Box<dyn AccelModel>>` // A dynamically sized vector of all the applicable acceleration models on the object. **AccelModel** is a custom struct detailed below
 
 
+  
 Objects have no methods exposed to python themselves, but can be passed to the **WorldState** struct through one of **WorldState**'s methods.
+## StateVector
+**StateVector** is a struct that contains the global cartesian position and velocity of an object. It contains the following fields:
+- position: `[f64;3]`
+- velocity: `[f64;3]`
+
+## RotationalState
+**RotationalState** is a struct that contains the orientation and angular velocity of an object. It contains the following fields:
+- quat: `[f64;4]` // Unit quaternion of the object's orientation
+- omega: `[f64;3]` // 3D angular velocity vector
 
 ## WorldState
 **WorldState** is a public struct exposed to Python. It contains the following fields:
 - objects: `Vec<Object>` // A dynamically sized vector of all the objects present in the world. Objects are of the **Object** struct type
-
 
 The **WorldState** type implements the following methods exposed to python:
 - `add_object` // Adds a new **object** to the world state. Takes the following arguments:
@@ -54,9 +63,9 @@ Critically, *models* is a Python list of Rust **AccelModel** types, which are de
 **AccelModel** is a *trait* in Rust that applies to a few different structs, where each  of these structs represents a different type of acceleration that may be applied to an **Object**. This design is intended to be modular and expandable. In the future, more types of acceleration than are accounted for now may be accounted for. Objects can also switch models on and off, for example, switching thrusters on and off. The methods for this trait are not accessible to Python, other than creating and adding new models to an object.
 **AccelModel** has no *methods* exposed to Python, only *structs*, that must be constructed using methods from **WorldState**. **AccelModel** implements the following methods:
 - `compute_accel` // Computes the acceleration of the object given the model, position vector, and velocity vector 
-    - `pos`: [f64;3] // 3D position vector of the **Object**
-    - `vel`: [f64;3] // 3D velocity vector of the **Object**
-(*NOTE*: This will be updated very soon to take arguments of **StateVector**, **RotationalState**, and **dt**. This will have no impact on the Python API)
+    - sv: `StateVector` // State vector struct; detailed above
+    - rs: `RotationalState` // Rotational state struct; detailed above
+    - -dt `f64` // Time step
 - `as_any` // Returns the type of model as an immutable reference
 - `as_any_mut` // Returns the model as a mutable reference. Used for updating attracting body positions at each timestep
 - `target_id` // Returns the `u32` ID of the attracting body (or the ID of the **Object** the model applies to if the model is a thruster burn)
@@ -80,7 +89,7 @@ Critically, *models* is a Python list of Rust **AccelModel** types, which are de
     - con_pos: `list[f64;3]` // A list of 3D position vectors of surface mass concentrations. It is up to the Python program / program writer to ensure that the vectors do indeed lie on or near to the surface of the body.
     - con_mag: `list[f64]` // A list of the magnitudes of the mass concentrations, as decimals. For example, if the mascon is 0.1% of the celestial body's mass, con_mag = [0.001]. The index of each value in con_mag should correspond to the mascon's position in con_pos
     - attractor_id: `u32` // ID of the attracting body
-*NOTE*: This model currently has issues with being accessible to Python that I will have to work out
+*NOTE*: The burn model currently has issues with being accessible to Python that I will have to work out
 - `Burn` // Thruster burn. Currently non-functional
     - thrust_mag: `f64` // Magnitude of the thrust. Should be in Newtons to match the mass of the craft being in kilograms
     - thrust_vec: `[f64;3]` // Unit vector of the thrust's vector. Typically will be the heading of the craft, but not necessarily
@@ -141,7 +150,7 @@ rs = physics_core.RotationalState(ax_quat, w)
 objects["Moon"]["models"].append(physics_core.J2(mu, sv.position, r_eq, j2, id)) # Adds the Earth's J2 as an acceleration applied to the Moon in a Python list of objects
 ```
 
-### Create the **WorldState** with all acceleration models
+### Create the **WorldState** with all objects and acceleration models
 ```Python
 ws = physics_core.WorldState()
 for obj in objects.values():
@@ -154,7 +163,7 @@ physics_core.step_all(dt)
 ```
 ### Get the state of any **Object** in the **WorldState**, and get the values of that state
 ```Python
-state = ws.get_state(objects["id"])
+state = ws.get_state(object["id"])
 position = state[0].position
 velocity = state[0].velocity
 quaternion = state[1].quat
