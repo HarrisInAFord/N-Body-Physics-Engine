@@ -73,7 +73,6 @@ Critically, *models* is a Python list of Rust **AccelModel** types, which are de
     - body_pos: `[f64;3]` // 3D position vector of the attracting body
     - r_eq: `f64` // Radius of the attracting body's equator
     - j2: `f64` // J2 oblateness factor of the attracting body
-    - rot_mat: `[[f64;3];3]` // Rotation matrix to rotate the attracting body's local Z axis into the global frame. *This is computed based on the quaternion from the **RotationalState** of the object within Python.*
     - attractor_id: `u32` // ID of the attracting body
 - `Mascons` // Replaces the simple `PointGravity` model with a model that can account for any number of gravitational concentrations on the body. These concentrations are expressed with a position vector in the local frame and a *fraction* of the bodies total mass in *decimal* form. The model has the following fields:
     - mu: `f64` // Gravitational parameter of the attracting body
