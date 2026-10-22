@@ -4,20 +4,24 @@ This document outlines the core public functions, argument types, units, and ret
 
 ### Python Exposed API: `integrator.rs` , `acceleration.rs`, and `lib.rs`
 
-Unless otherwise noted, values are in MKS units and vectors are in a global cartesian system.
+Unless otherwise noted: 
+
+Values are in MKS units and vectors are in a global cartesian system.
+Cartesian vectors are as such: [x,y,z]
+Unit quaternions are [w,x,y,z]
 
 ## Object
-**Object** is a public struct that must be passed into Rust. It contains the following fields:
+**Object** is an struct that must be constructed in Rust by a **WorldState** method. It contains the following fields:
 - id: `u32` // The unique object ID for each object, **32 bit** unsigned integer
 - name: `String` // The name of the body. Does not need to be unique. **String**
-- ob_typ: `bool` // The type of the body. **True** for a celestial body, **False** for a spacecraft. Currently unused
+- ob_type: `bool` // The type of the body. **True** for a celestial body, **False** for a spacecraft. Currently unused
 - state: `StateVector` // The state vector of the object, containing 3D *position* and *velocity* vectors. **StateVector** is a custom struct detailed below 
 - rot_state: `RotationalState` // The rotational state of the object, containing a *unit quaternion* and 3D *angular velocity* vector. **RotationalState** is a struct, detailed below
-- models: `Vec<Box<dyn AccelModel>>` // A dynamically sized vector of all the applicable acceleration models on the object. **AccelModel** is a custom struct detailed below
+- models: `Vec<Box<dyn AccelModel>>` // A dynamically sized vector of all the applicable acceleration models on the object. **AccelModel** is a custom trait detailed below
 
 
-  
 Objects have no methods exposed to python themselves, but can be passed to the **WorldState** struct through one of **WorldState**'s methods.
+
 ## StateVector
 **StateVector** is a struct that contains the global cartesian position and velocity of an object. It contains the following fields:
 - position: `[f64;3]`
@@ -29,8 +33,9 @@ Objects have no methods exposed to python themselves, but can be passed to the *
 - omega: `[f64;3]` // 3D angular velocity vector
 
 ## WorldState
-**WorldState** is a public struct exposed to Python. It contains the following fields:
+**WorldState** is a struct. While it is not exposed to Python itself, it has some methods exposed to Python. It contains the following fields:
 - objects: `Vec<Object>` // A dynamically sized vector of all the objects present in the world. Objects are of the **Object** struct type
+
 
 The **WorldState** type implements the following methods exposed to python:
 - `add_object` // Adds a new **object** to the world state. Takes the following arguments:
@@ -61,10 +66,11 @@ Critically, *models* is a Python list of Rust **AccelModel** types, which are de
 
 ## AccelModel
 **AccelModel** is a *trait* in Rust that applies to a few different structs, where each  of these structs represents a different type of acceleration that may be applied to an **Object**. This design is intended to be modular and expandable. In the future, more types of acceleration than are accounted for now may be accounted for. Objects can also switch models on and off, for example, switching thrusters on and off. The methods for this trait are not accessible to Python, other than creating and adding new models to an object.
-**AccelModel** has no *methods* exposed to Python, only *structs*, that must be constructed using methods from **WorldState**. **AccelModel** implements the following methods:
+**AccelModel** has no *methods* exposed to Python, and all *structs* must be constructed using methods from **WorldState**. **AccelModel** implements the following methods:
 - `compute_accel` // Computes the acceleration of the object given the model, position vector, and velocity vector 
-    - sv: `StateVector` // State vector struct; detailed above
-    - rs: `RotationalState` // Rotational state struct; detailed above
+    - sv: `StateVector` // State vector struct of the **Object**; detailed above
+    - rs: `RotationalState` // Rotational state struct of the **Object**; detailed above
+    - ws: `WorldState` // World State struct; used primarily to apply to models that require information about the rotation of other objects
     - -dt `f64` // Time step
 - `as_any` // Returns the type of model as an immutable reference
 - `as_any_mut` // Returns the model as a mutable reference. Used for updating attracting body positions at each timestep
@@ -83,13 +89,13 @@ Critically, *models* is a Python list of Rust **AccelModel** types, which are de
     - r_eq: `f64` // Radius of the attracting body's equator
     - j2: `f64` // J2 oblateness factor of the attracting body
     - attractor_id: `u32` // ID of the attracting body
-- `Mascons` // Replaces the simple `PointGravity` model with a model that can account for any number of gravitational concentrations on the body. These concentrations are expressed with a position vector in the local frame and a *fraction* of the bodies total mass in *decimal* form. The model has the following fields:
+- `Mascons` // Replaces the simple `PointGravity` model with a model that can account for any number of gravitational concentrations on the body. These concentrations are expressed with a position vector in the local frame and a *fraction* of the bodies total mass in *decimal* form.  **One critical consiteration when using this model is that no attracting body should ever effect both Mascons and PointGravity onto the same object simultaneously, as Mascons accounts for the Point Gravity within itself. Applying both models will the object to effectively feel twice the acceleration it should.** The model has the following fields:
     - mu: `f64` // Gravitational parameter of the attracting body
     - body_pos: `[f64;3]` // 3D position vector of the attracting body
-    - con_pos: `list[f64;3]` // A list of 3D position vectors of surface mass concentrations. It is up to the Python program / program writer to ensure that the vectors do indeed lie on or near to the surface of the body.
+    - con_pos: `list[f64;3]` // A list of 3D position vectors of surface mass concentrations. It is up to the Python program / program writer to ensure that the vectors do indeed lie on or near to the surface of the body. Note also that con_pos and con_mag should be of identical lengths.
     - con_mag: `list[f64]` // A list of the magnitudes of the mass concentrations, as decimals. For example, if the mascon is 0.1% of the celestial body's mass, con_mag = [0.001]. The index of each value in con_mag should correspond to the mascon's position in con_pos
     - attractor_id: `u32` // ID of the attracting body
-*NOTE*: The burn model currently has issues with being accessible to Python that I will have to work out
+    *Note*: Burn is implemented as a basic acceleration model, but fuel management and spacecraft mass are not implemented within the Rust code, they must be written into the Python code accessing this physics engine.
 - `Burn` // Thruster burn. Currently non-functional
     - thrust_mag: `f64` // Magnitude of the thrust. Should be in Newtons to match the mass of the craft being in kilograms
     - thrust_vec: `[f64;3]` // Unit vector of the thrust's vector. Typically will be the heading of the craft, but not necessarily
@@ -150,7 +156,7 @@ rs = physics_core.RotationalState(ax_quat, w)
 objects["Moon"]["models"].append(physics_core.J2(mu, sv.position, r_eq, j2, id)) # Adds the Earth's J2 as an acceleration applied to the Moon in a Python list of objects
 ```
 
-### Create the **WorldState** with all objects and acceleration models
+### Create the **WorldState** with all acceleration models
 ```Python
 ws = physics_core.WorldState()
 for obj in objects.values():
@@ -159,13 +165,31 @@ for obj in objects.values():
 ### Step time forwards
 ```Python
 dt = 10 # Ten second time step
-physics_core.step_all(dt)
+ws.step_all(dt) # assuming ws is the **WorldState** specified above
 ```
 ### Get the state of any **Object** in the **WorldState**, and get the values of that state
 ```Python
-state = ws.get_state(object["id"])
+state = ws.get_state(objects["Earth"]["id"])
 position = state[0].position
 velocity = state[0].velocity
 quaternion = state[1].quat
 angular_velocity = state[1].omega
 ```
+Note that `get_state()` returns `None` when the requested ID does not exist
+
+# Known Limitations
+The following limitations are present in the current implementation of `physics_core` and may be addressed in future development.
+
+- **N-Body RK4 Integration:** Although individual objects are integrated using fourth-order Runge-Kutta (RK4), the positions of other celestial bodies remain fixed during each object's RK4 substeps. Consequently, the integrator is not yet a fully coupled N-body RK4 implementation, potentially reducing accuracy in strongly interacting gravitational systems.
+
+- **Attitude Integration:** Quaternion evolution currently uses first-order Euler integration with normalization rather than RK4. Angular velocity (`omega`) remains constant unless externally modified; rotational dynamics and applied torques are not yet implemented.
+
+- **Acceleration Model Removal:** `trim_model()` removes all acceleration models matching the specified model type and `target_id`, rather than a particular instance. Multiple models of the same type associated with the same target cannot currently be removed independently.
+
+- **Input Validation:** Some constructors lack comprehensive input validation. For example, `StateVector` expects three-element position and velocity vectors, while `Mascons` requires matching `con_pos` and `con_mag` lengths. Invalid inputs may cause Rust panics rather than Python exceptions.
+
+- **Gravitational Model Dependencies:** `J2` and `Mascons` require their attracting bodies to exist in `WorldState` to retrieve orientation data. Missing attractors may cause a panic. Additionally, `Mascons` must not be applied alongside `PointGravity` for the same attractor, as this would double-count gravitational acceleration.
+
+- **Thruster Burn Model:** `Burn` calculates thrust acceleration but does not automatically update spacecraft mass, propellant reserves, or thrust direction. These parameters must currently be managed externally by Python. The supplied `thrust_vec` must also be a unit vector in the global coordinate frame.
+
+- **Python API Exposure:** `Object` and the `AccelModel` trait are internal Rust constructs, not directly exposed as Python classes. Objects must be created through `WorldState.add_object()`, and acceleration models must be instantiated using their concrete Python-exposed classes.
